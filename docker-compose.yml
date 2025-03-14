@@ -1,0 +1,74 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: tasks
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  nsqlookupd:
+    image: nsqio/nsq
+    command: /nsqlookupd
+    ports:
+      - "4160:4160"
+      - "4161:4161"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q http://localhost:4161/ping -O -"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  nsqd:
+    image: nsqio/nsq
+    command: /nsqd --lookupd-tcp-address=nsqlookupd:4160
+    depends_on:
+      nsqlookupd:
+        condition: service_healthy
+    ports:
+      - "4150:4150"
+      - "4151:4151"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q http://localhost:4151/ping -O -"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  nsqadmin:
+    image: nsqio/nsq
+    command: /nsqadmin --lookupd-http-address=nsqlookupd:4161
+    depends_on:
+      nsqlookupd:
+        condition: service_healthy
+    ports:
+      - "4171:4171"
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        - DATABASE_URL=postgres://postgres:postgres@postgres:5432/tasks
+    ports:
+      - "3000:3000"
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@postgres:5432/tasks
+      NSQD_URL: nsqd:4150
+    depends_on:
+      postgres:
+        condition: service_healthy
+      nsqd:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
